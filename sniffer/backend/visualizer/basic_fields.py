@@ -1,5 +1,4 @@
-from tables.protocols import PROTOCOLS
-
+from sniffer.backend.tables.protocols import PROTOCOLS
 
 def parse_total_length(raw):
 

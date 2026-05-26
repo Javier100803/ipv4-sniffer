@@ -291,3 +291,32 @@ pre {
 
     opacity: 0.5;
 }
+#timeline {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 70px;
+    background: #111;
+    border-bottom: 1px solid #333;
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 8px;
+    z-index: 10;
+  }
+  
+  .timeline-node {
+    min-width: 160px;
+    padding: 6px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: #1a1a1a;
+    color: #00ff99;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  
+  .timeline-node:hover {
+    border-color: #00ff99;
+  }

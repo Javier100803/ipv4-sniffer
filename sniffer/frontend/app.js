@@ -1,729 +1,166 @@
+const packetsDiv = document.getElementById('table');
+const analysisDiv = document.getElementById('right');
+const timelineDiv = document.getElementById('timeline');
 
+let selectedPacket = null;
+let packets = [];
+let filterText = "";
+// =========================
+// SOCKET
+// =========================
+const socket = io("http://127.0.0.1:5000");
+const filterInput = document.getElementById("filterInput");
 
-const packetsDiv =
-    document.getElementById('packets')
+filterInput.addEventListener("input", (e) => {
+    filterText = e.target.value.toLowerCase();
+    renderList();
+});
+socket.on("connect", () => {
+    analysisDiv.innerText = "🟢 Conectado al sniffer...";
+});
 
-const analysisDiv =
-    document.getElementById('analysis')
-
-let selectedPacketElement = null
-
-let openedField = null
-const MAX_PACKETS = 50
-const FIELD_RENDERERS = {
-
-    version_ihl:
-        renderVersionIhl,
-
-    dscp_ecn:
-        renderDscp,
-
-    flags_fragment:
-        renderFlags,
-
-    total_length:
-        (field) =>
-            renderSimpleField(
-                'TOTAL LENGTH',
-                field
-            ),
-
-    identification:
-        (field) =>
-            renderSimpleField(
-                'IDENTIFICATION',
-                field
-            ),
-
-    ttl:
-        (field) =>
-            renderSimpleField(
-                'TTL',
-                field
-            ),
-
-    protocol:
-        (field) =>
-            renderSimpleField(
-                'PROTOCOL',
-                field
-            ),
-
-    checksum:
-        (field) =>
-            renderSimpleField(
-                'CHECKSUM',
-                field
-            ),
-
-    source_ip:
-        (field) =>
-            renderSimpleField(
-                'SOURCE IP',
-                field
-            ),
-
-    destination_ip:
-        (field) =>
-            renderSimpleField(
-                'DESTINATION IP',
-                field
-            )
+// =========================
+// SAFE
+// =========================
+function safe(v) {
+    if (!v) return "—";
+    if (typeof v === "object") return v.value || v.meaning || JSON.stringify(v);
+    return v;
 }
 
-/* ========================================================= */
-/* FETCH PACKETS */
-/* ========================================================= */
+// =========================
+// PACKET IN
+// =========================
+socket.on("packet", (packet) => {
 
-async function fetchPacket() {
+    packet._meta = {
+        time: new Date().toLocaleTimeString()
+    };
 
-    try {
+    packets.unshift(packet);
 
-        const response =
-            await fetch(
-                'http://localhost:5000/packet'
-            )
+    if (packets.length > 100) packets.pop();
 
-        const packet =
-            await response.json()
+    renderList();
+    addTimeline(packet);
+});
 
-        addPacket(packet)
+// =========================
+// LEFT LIST (PRO)
+// =========================
+function matchFilter(p) {
 
-    } catch (error) {
+    if (!filterText) return true;
 
-        console.error(error)
-    }
+    const ip = p.ipv4;
+
+    const layer2 = (p.type || "").toLowerCase();
+    const layer4 = (ip?.header?.protocol?.meaning || "").toLowerCase();
+
+    const src = (ip?.header?.source_ip?.value || "").toLowerCase();
+    const dst = (ip?.header?.destination_ip?.value || "").toLowerCase();
+
+    return (
+        layer2.includes(filterText) ||
+        layer4.includes(filterText) ||
+        src.includes(filterText) ||
+        dst.includes(filterText)
+    );
 }
 
+function renderList() {
 
-/* ========================================================= */
-/* ADD PACKET */
-/* ========================================================= */
+    packetsDiv.innerHTML = "";
 
-function addPacket(packet) {
+    packets
+        .filter(matchFilter)
+        .forEach(p => {
 
-    const item =
-        document.createElement('div')
+            const div = document.createElement("div");
+            div.className = "packet-item";
 
-    item.className =
-        'packet-item'
+            const ip = p.ipv4;
 
-    const protocol =
-        packet.ipv4?.header?.protocol?.meaning
-        || 'UNKNOWN'
+            let layer2 = p.type || "UNKNOWN";
+            let layer4 = ip?.header?.protocol?.meaning || "";
 
-    const source =
-        packet.ipv4?.header?.source_ip?.value
-        || 'Unknown'
+            const src = ip?.header?.source_ip?.value || "—";
+            const dst = ip?.header?.destination_ip?.value || "—";
 
-    const destination =
-        packet.ipv4?.header?.destination_ip?.value
-        || 'Unknown'
+            div.innerHTML = `
+                <b>${layer2}${layer4 ? " → " + layer4 : ""}</b><br>
+                ${src} → ${dst}
+            `;
 
-    item.innerHTML = `
+            div.onclick = () => showPacket(p);
 
-        <strong>${protocol}</strong>
-
-        <br><br>
-
-        ${source}
-
-        <br>
-
-        ↓
-
-        <br>
-
-        ${destination}
-    `
-
-    item.onclick = () => {
-
-        if (selectedPacketElement) {
-
-            selectedPacketElement
-                .classList
-                .remove('active')
-        }
-
-        item.classList.add('active')
-
-        selectedPacketElement = item
-
-        showAnalysis(packet)
-        function renderTransportLayer(packet) {
-
-    const transport =
-        packet.ipv4.transport
-
-    if (!transport)
-        return
-
-    if (transport.tcp) {
-
-        createSectionTitle(
-            'TCP HEADER'
-        )
-
-        const tcp =
-            transport.tcp.header
-
-        for (const key in tcp) {
-
-            const field =
-                tcp[key]
-
-            if (
-                key === 'flags'
-            ) {
-
-                analysisDiv.appendChild(
-                    renderTcpFlags(field)
-                )
-
-                continue
-            }
-
-            analysisDiv.appendChild(
-
-                renderSimpleField(
-
-                    key
-                        .replace('_', ' ')
-                        .toUpperCase(),
-
-                    field
-                )
-            )
-        }
-    }
-}
-    }
-
-    packetsDiv.prepend(item)
-
-    while (
-        packetsDiv.children.length > MAX_PACKETS
-    ) {
-
-        packetsDiv.removeChild(
-            packetsDiv.lastChild
-        )
-    }
+            packetsDiv.appendChild(div);
+        });
 }
 
+// =========================
+// PACKET INSPECTOR (WIRESHARK STYLE)
+// =========================
+function showPacket(p) {
 
-/* ========================================================= */
-/* SHOW ANALYSIS */
-/* ========================================================= */
-function showAnalysis(packet) {
+    selectedPacket = p;
 
-    analysisDiv.innerHTML = ''
+    const ip = p.ipv4;
 
-    openedField = null
-
-    if (!packet.ipv4) {
-
+    if (!ip) {
         analysisDiv.innerHTML = `
-
-            <h2>
-                Unsupported Protocol
-            </h2>
-        `
-
-        return
+<h3>Non IPv4 Packet</h3>
+<pre>${JSON.stringify(p, null, 2)}</pre>
+`;
+        return;
     }
 
-    const ipv4 =
-        packet.ipv4.header
-
-    createSectionTitle('IPv4 HEADER')
-
-    for (const key in ipv4) {
-
-        const renderer =
-            FIELD_RENDERERS[key]
-
-        if (!renderer)
-            continue
-
-        const field =
-            ipv4[key]
-
-        analysisDiv.appendChild(
-            renderer(field)
-        )
-    }
-
-    renderTransportLayer(packet)
-
-renderHexView(packet)
-
-}
-
-
-/* ========================================================= */
-/* SECTION TITLE */
-/* ========================================================= */
-
-function createSectionTitle(title) {
-
-    const section =
-        document.createElement('div')
-
-    section.className =
-        'section-title'
-
-    section.innerText =
-        title
-
-    analysisDiv.appendChild(section)
-}
-
-
-/* ========================================================= */
-/* HEX VIEW */
-/* ========================================================= */
-
-function renderHexView(packet) {
-
-    const title =
-        document.createElement('div')
-
-    title.className =
-        'section-title'
-
-    title.innerText =
-        'RAW FRAME'
-
-    analysisDiv.appendChild(title)
-
-    const container =
-        document.createElement('div')
-
-    container.className =
-        'hex-container'
-
-    const bytes =
-        packet.ipv4.raw_bytes
-
-    for (let i = 0; i < bytes.length; i += 8) {
-
-        const row =
-            document.createElement('div')
-
-        row.className =
-            'hex-row'
-
-        const offset =
-            document.createElement('div')
-
-        offset.className =
-            'offset'
-
-        offset.innerText =
-            i.toString(16)
-             .padStart(4, '0')
-
-        row.appendChild(offset)
-
-        for (
-            let j = i;
-            j < i + 8 && j < bytes.length;
-            j++
-        ) {
-
-            const byte =
-                document.createElement('div')
-
-            byte.className =
-                'hex-byte'
-
-            byte.id =
-                `byte-${j}`
-
-            byte.innerText =
-                bytes[j]
-
-            row.appendChild(byte)
-        }
-
-        container.appendChild(row)
-    }
-
-    analysisDiv.appendChild(container)
-}
-
-
-/* ========================================================= */
-/* HIGHLIGHT */
-/* ========================================================= */
-
-function highlightBytes(
-    offset,
-    length
-) {
-
-    document
-        .querySelectorAll('.hex-byte')
-        .forEach(el => {
-
-            el.classList.remove('active')
-        })
-
-    for (
-        let i = offset;
-        i < offset + length;
-        i++
-    ) {
-
-        const byte =
-            document.getElementById(
-                `byte-${i}`
-            )
-
-        if (byte) {
-
-            byte.classList.add('active')
-        }
-    }
-}
-
-
-/* ========================================================= */
-/* GENERIC FIELD */
-/* ========================================================= */
-
-function createExpandableField(
-    title,
-    field,
-    content
-) {
-
-    const card =
-        document.createElement('div')
-
-    card.className =
-        'field-card'
-
-    const header =
-        document.createElement('div')
-
-    header.className =
-        'field-header'
-
-    header.innerHTML = `
-
-        <div class="field-title">
-            ${title}
-        </div>
-
-        <div class="field-binary">
-            ${field.raw_binary}
-        </div>
-    `
-
-    const details =
-        document.createElement('div')
-
-    details.className =
-        'field-details'
-
-    details.innerHTML =
-        content
-
-    header.onclick = () => {
-
-        document
-            .querySelectorAll('.field-details')
-            .forEach(el => {
-
-                el.style.display = 'none'
-            })
-
-        document
-            .querySelectorAll('.field-card')
-            .forEach(el => {
-
-                el.classList.remove('active')
-            })
-
-        details.style.display = 'block'
-
-        card.classList.add('active')
-
-        highlightBytes(
-            field.offset,
-            field.length
-        )
-    }
-
-    card.appendChild(header)
-
-    card.appendChild(details)
-
-    return card
-}
-
-
-/* ========================================================= */
-/* VERSION + IHL */
-/* ========================================================= */
-
-function renderVersionIhl(field) {
-
-    const version =
-        field.breakdown.version
-
-    const ihl =
-        field.breakdown.ihl
-
-    const content = `
-
-        <div class="label">
-            RAW HEX
-        </div>
-
-        <div class="value">
-            ${field.raw_hex}
-        </div>
-
-        <div class="label">
-            RAW BINARY
-        </div>
-
-        <div class="value">
-            ${field.raw_binary}
-        </div>
-
-        <div class="breakdown">
-
-            ${version.bits}
-            ${ihl.bits}
-
-        </div>
-
+    const h = ip.header || {};
+
+    let transport = ip.transport
+        ? Object.entries(ip.transport).map(([k,v]) => `
+<b>${k.toUpperCase()}</b>
+${JSON.stringify(v, null, 2)}
+`).join("\n")
+        : "No transport data";
+
+    analysisDiv.innerHTML = `
+<h3>📦 Packet Inspector</h3>
+
+<h4>IPv4</h4>
 <pre>
-│    └─ IHL
-└────── Version
+Source: ${safe(h.source_ip)}
+Destination: ${safe(h.destination_ip)}
+Protocol: ${safe(h.protocol)}
+TTL: ${safe(h.ttl)}
+Checksum: ${safe(h.checksum)}
 </pre>
 
-        <div>
+<h4>Transport</h4>
+<pre>${transport}</pre>
 
-            <strong>Version:</strong>
-
-            IPv${version.value}
-
-        </div>
-
-        <br>
-
-        <div>
-
-            <strong>IHL:</strong>
-
-            ${ihl.meaning}
-
-        </div>
-    `
-
-    return createExpandableField(
-        'VERSION + IHL',
-        field,
-        content
-    )
+<h4>Raw Payload</h4>
+<pre>${p.payload_hex || "N/A"}</pre>
+`;
 }
 
-
-/* ========================================================= */
-/* DSCP */
-/* ========================================================= */
-
-function renderDscp(field) {
-
-    const dscp =
-        field.breakdown.dscp
-
-    const ecn =
-        field.breakdown.ecn
-
-    const content = `
-
-        <div class="label">
-            RAW HEX
-        </div>
-
-        <div class="value">
-            ${field.raw_hex}
-        </div>
-
-        <div class="breakdown">
-
-            ${dscp.bits}
-            ${ecn.bits}
-
-        </div>
-
-<pre>
-│      └─ ECN
-└──────── DSCP
-</pre>
-
-        <div>
-
-            <strong>Class:</strong>
-
-            ${dscp.class}
-
-        </div>
-
-        <br>
-
-        <div>
-
-            <strong>Usage:</strong>
-
-            ${dscp.usage}
-
-        </div>
-    `
-
-    return createExpandableField(
-        'DSCP + ECN',
-        field,
-        content
-    )
-}
-
-
-/* ========================================================= */
-/* FLAGS */
-/* ========================================================= */
-
-function renderFlags(field) {
-
-    const flags =
-        field.breakdown.flags
-
-    const offset =
-        field.breakdown.fragment_offset
-
-    const content = `
-
-        <div class="label">
-            RAW HEX
-        </div>
-
-        <div class="value">
-            ${field.raw_hex}
-        </div>
-
-        <div class="breakdown">
-
-            ${flags.bits}
-            ${offset.bits}
-
-        </div>
-
-<pre>
-│││ └──────────── Fragment Offset
-││└────────────── MF
-│└─────────────── DF
-└──────────────── Reserved
-</pre>
-
-        <div>
-
-            <strong>DF:</strong>
-
-            ${flags.df.meaning}
-
-        </div>
-
-        <br>
-
-        <div>
-
-            <strong>MF:</strong>
-
-            ${flags.mf.meaning}
-
-        </div>
-
-        <br>
-
-        <div>
-
-            <strong>Offset:</strong>
-
-            ${offset.value}
-
-        </div>
-    `
-
-    return createExpandableField(
-        'FLAGS + FRAGMENT OFFSET',
-        field,
-        content
-    )
-}
-function renderSimpleField(
-    title,
-    field
-) {
-
-    const content = `
-
-        <div class="label">
-            RAW HEX
-        </div>
-
-        <div class="value">
-            ${field.raw_hex}
-        </div>
-
-        <div class="label">
-            RAW BINARY
-        </div>
-
-        <div class="value">
-            ${field.raw_binary}
-        </div>
-
-        <br>
-
-        <div>
-
-            <strong>Value:</strong>
-
-            ${field.value}
-
-        </div>
-
-        <br>
-
-        <div>
-
-            <strong>Meaning:</strong>
-
-            ${field.meaning || 'N/A'}
-
-        </div>
-    `
-
-    return createExpandableField(
-        title,
-        field,
-        content
-    )
-}
-
-
-/* ========================================================= */
-/* AUTO FETCH */
-/* ========================================================= */
-
-setInterval(
-    fetchPacket,
-    3000
-)
+// =========================
+// TIMELINE SIMPLE
+// =========================
+socket.on("packet", (p) => {
+
+    const div = document.createElement("div");
+    div.style.minWidth = "160px";
+    div.style.padding = "6px";
+    div.style.background = "#222";
+    div.style.fontSize = "11px";
+
+    const ip = p.ipv4;
+
+    div.innerHTML = `
+        ${p.type}<br>
+        ${ip?.header?.source_ip?.value || "?"} → ${ip?.header?.destination_ip?.value || "?"}
+    `;
+
+    timelineDiv.appendChild(div);
+});

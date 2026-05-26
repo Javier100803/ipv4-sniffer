@@ -1,5 +1,4 @@
-from tables.dscp import DSCP_TABLE
-
+from sniffer.backend.tables.dscp import DSCP_TABLE
 
 def parse_dscp(byte):
 

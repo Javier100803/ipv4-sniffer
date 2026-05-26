@@ -1,8 +1,6 @@
-from parser.tcp.source_port import parse_source_port
-from parser.tcp.destination_port import parse_destination_port
-from parser.tcp.flags import parse_tcp_flags
-
-
+from sniffer.backend.parser.tcp.source_port import parse_source_port
+from sniffer.backend.parser.tcp.destination_port import parse_destination_port
+from sniffer.backend.parser.tcp.flags import parse_tcp_flags
 def parse_tcp(data):
 
     return {

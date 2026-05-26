@@ -1,7 +1,5 @@
 import struct
-
-from tables.ethertypes import ETHERTYPES
-
+from sniffer.backend.tables.ethertypes import ETHERTYPES
 
 def format_mac(mac_bytes):
 
